@@ -48,7 +48,6 @@ class LeadRepository:
             cursor.execute("SELECT estado_fsm_json, chat_history_json FROM leads WHERE telefone = ?", (telefone,))
             row = cursor.fetchone()
             
-            # Novo esquema de memória de alta granularidade (BUILD V9)
             estado_padrao = {
                 "ja_se_apresentou": False, "pre_proposta_enviada": False, "proposta_enviada": False,
                 "nome_cliente": None, "tipo_evento": None, "data": None, 
@@ -60,7 +59,6 @@ class LeadRepository:
             if row:
                 estado_db = json.loads(row[0]) if row[0] else {}
                 chat_db = json.loads(row[1]) if row[1] else chat_padrao
-                # Faz o merge para garantir que chaves novas (V9) existam em leads antigos (V8)
                 estado_mesclado = {**estado_padrao, **estado_db}
                 return {"memoria_lead": estado_mesclado, "chat_history": chat_db}
             
@@ -103,39 +101,46 @@ class RoteirosPablo:
     PRE_PROPOSTA = "Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo \"passear\" por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema"
     PONTE_CONVERSACIONAL = "Perfeito! Vou separar alguns materiais nossos para te enviar, assim vocês conseguem sentir um pouco mais da nossa energia. 🎶\n\nE conforme conversamos, "
     PROPOSTA_PADRAO = "{saudacao_proposta}segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\n\n*[📎 ARQUIVO PDF ANEXADO: Proposta_Rafa_Cout.pdf]*\n\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\n\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
-    POS_PROPOSTA_FALLBACK = "Opa! O arquivo em PDF com todos os valores e detalhes da estrutura foi enviado logo acima. 👆 Consegue visualizar por aí? Qualquer dúvida sobre a proposta, é só me falar! 😊"
 
 # ======================================================================
-# 3. CAMADA DE INFRAESTRUTURA NLU (Extração JSON isolada)
+# 3. CAMADA DE INFRAESTRUTURA NLU & NLG (Cérebro Híbrido)
 # ======================================================================
-class NLUEngine:
+class AIEngine:
     EXTRACTION_PROMPT = """
     Você é um extrator de dados JSON estrito. Leia o histórico da conversa.
     NÃO gere texto. Responda APENAS em JSON válido.
 
     REGRAS CRÍTICAS DE EXTRAÇÃO:
-    - "tipo_evento": Exija a natureza EXATA. DEVE ser: Casamento, Corporativo, Aniversário, 15 Anos, Formatura, ou Evento Público. Se o cliente disser palavras genéricas como "show", "festa" ou "evento", CLASSIFIQUE COMO null.
+    - "tipo_evento": Exija a natureza EXATA. DEVE ser: Casamento, Corporativo, Aniversário, 15 Anos, Formatura, ou Evento Público. Se o cliente disser palavras genéricas, CLASSIFIQUE COMO null.
     - "data": Formato natural (ex: "19 de dezembro de 2026").
     - "cidade": Apenas o nome da cidade.
-    - "casa_festas": O nome do espaço ou casa de festas. Se o cliente falar APENAS a cidade, classifique isso como null.
+    - "casa_festas": O nome do espaço. Se o cliente falar APENAS a cidade, classifique isso como null.
     - "horario_show": Formato natural (ex: "22 horas").
     - "nome_homenageado": Nome do casal/aniversariante/empresa.
-    - "nome_cliente": O SEU NOME É PABLO E O ARTISTA É RAFA. Nunca preencha "Pablo" ou "Rafa" aqui.
+    - "nome_cliente": NUNCA preencha "Pablo" ou "Rafa" aqui.
 
     FORMATO DE SAÍDA OBRIGATÓRIO:
     {
         "intencao": "oi_simples | orcamento | informacao",
         "entidades": {
-            "nome_cliente": "valor ou null",
-            "tipo_evento": "Casamento | Corporativo | Aniversário | Formatura | 15 Anos | null",
-            "data": "valor ou null",
-            "cidade": "valor ou null",
-            "casa_festas": "valor ou null",
-            "horario_show": "valor ou null",
-            "nome_homenageado": "valor ou null"
+            "nome_cliente": "valor ou null", "tipo_evento": "Casamento | Corporativo | Aniversário | Formatura | 15 Anos | null",
+            "data": "valor ou null", "cidade": "valor ou null", "casa_festas": "valor ou null",
+            "horario_show": "valor ou null", "nome_homenageado": "valor ou null"
         }
     }
     """
+    
+    POS_PROPOSTA_PROMPT = """
+    Você é Pablo, o empresário atencioso e persuasivo do cantor Rafa Cout.
+    O sistema de atendimento automático acabou de enviar um orçamento em formato PDF para este cliente no WhatsApp.
+    O cliente fez uma pergunta ou comentário APÓS receber a proposta. Responda de forma natural, curta e simpática (estilo WhatsApp).
+    
+    REGRAS ABSOLUTAS (A QUEBRA DELAS RESULTARÁ EM DEMISSÃO):
+    1. NUNCA INVENTE PREÇOS OU VALORES. Se o cliente perguntar o preço (pois não conseguiu abrir o PDF), diga: "Como temos diferentes pacotes e estruturas, os valores estão detalhados no arquivo PDF. Mas se não estiver conseguindo abrir, me avise que eu digito um resumo dos valores para você aqui mesmo! 😉"
+    2. Se ele perguntar sobre repertório, seja vendedor: diga que o Rafa toca de tudo para não deixar ninguém parado.
+    3. Seja humano. Mostre entusiasmo pelo evento dele.
+    """
+
     def __init__(self):
         self.client = Groq(api_key=Config.get_groq_key())
 
@@ -150,15 +155,28 @@ class NLUEngine:
         except Exception:
             return {"intencao": "informacao", "entidades": {}}
 
+    def gerar_resposta_pos_proposta(self, historico: list) -> str:
+        messages = [{"role": "system", "content": self.POS_PROPOSTA_PROMPT}] + historico
+        try:
+            response = self.client.chat.completions.create(
+                messages=messages, model="llama-3.3-70b-versatile",
+                temperature=0.5, max_tokens=200
+            )
+            return response.choices[0].message.content
+        except Exception:
+            return "Deixa eu verificar isso para você rapidinho! Pode aguardar um instante? 😊"
+
 # ======================================================================
 # 4. MÁQUINA DE ESTADOS FINITA (O Cérebro em Python)
 # ======================================================================
 class PabloFSM:
-    def processar_estado(self, intencao: str, entidades: dict, memoria: dict) -> str:
+    def __init__(self, ai_engine: AIEngine):
+        self.ai = ai_engine
+
+    def processar_estado(self, intencao: str, entidades: dict, memoria: dict, historico: list) -> str:
         for k, v in entidades.items():
             if v and str(v).lower() not in ["null", "none"]: memoria[k] = v
 
-        # Bloqueio de Identidade
         nome_raw = memoria.get("nome_cliente")
         if nome_raw and str(nome_raw).strip().lower() in ["pablo", "rafa", "rafa cout"]:
             nome_raw = None; memoria["nome_cliente"] = None
@@ -175,7 +193,11 @@ class PabloFSM:
         tratamento_nome = f", {nome}" if nome else ""
         saudacao_proposta = f"{nome}, " if nome else ""
 
-        if memoria.get("proposta_enviada"): return RoteirosPablo.POS_PROPOSTA_FALLBACK
+        # -------------------------------------------------------------
+        # ARQUITETURA HÍBRIDA: Geração LLM Livre Pós-Proposta
+        # -------------------------------------------------------------
+        if memoria.get("proposta_enviada"):
+            return self.ai.gerar_resposta_pos_proposta(historico)
 
         if memoria.get("pre_proposta_enviada"):
             memoria["proposta_enviada"] = True
@@ -184,7 +206,6 @@ class PabloFSM:
             data = str(memoria.get("data", "")).strip()
             horario = str(memoria.get("horario_show", "")).strip()
             
-            # Consolida cidade e casa_festas para o PDF
             cidade_str = str(memoria.get("cidade", "")).strip().title()
             casa_str = str(memoria.get("casa_festas", "")).strip().title()
             local_final = f"{casa_str}, {cidade_str}".strip(" ,") if casa_str else cidade_str
@@ -199,9 +220,6 @@ class PabloFSM:
             memoria["ja_se_apresentou"] = True
             return RoteirosPablo.SAUDACAO_SIMPLES.format(saudacao_tempo=saudacao_tempo, nome_cliente=tratamento_nome).replace(" .", ".")
 
-        # -------------------------------------------------------------
-        # PILARES FUNDAMENTAIS (Crivo Rigoroso)
-        # -------------------------------------------------------------
         campos_faltantes = []
         if not memoria.get("tipo_evento"): campos_faltantes.append("Tipo exato do evento (Ex: Casamento, Aniversário, Corporativo)")
         if not memoria.get("data"): campos_faltantes.append("Data completa (com ano)")
@@ -219,32 +237,24 @@ class PabloFSM:
             else:
                 return RoteirosPablo.PARCIAL_CONTINUACAO.format(campos_faltantes=texto_faltantes)
 
-        # -------------------------------------------------------------
-        # MICRO-VALIDAÇÕES (SÓ ACONTECEM SE OS 4 PILARES ESTIVEREM CHEIOS)
-        # -------------------------------------------------------------
-        
-        # Micro 1: Local Incompleto (Deu a cidade, mas não a casa de festas)
         if memoria.get("cidade") and not memoria.get("casa_festas"):
-            if not memoria.get("local_perguntado"): # Evita loop se a IA não entender a casa no turno seguinte
+            if not memoria.get("local_perguntado"):
                 memoria["local_perguntado"] = True
                 return RoteirosPablo.CONFIRMA_LOCAL
                 
-        # Micro 2: Confirmação de Horário (Festa vs Show)
         if not memoria.get("horario_perguntado"):
             horario_str = str(memoria.get("horario_show")).lower()
             is_madrugada = any(m in horario_str for m in ["madrugada", "00:", "01:", "02:", "03:", "04:", "1 ", "2 "])
-            memoria["horario_perguntado"] = True # Marca para não repetir
+            memoria["horario_perguntado"] = True
             if not is_madrugada:
                 return RoteirosPablo.CONFIRMA_HORARIO
 
-        # Micro 3: Nomes Específicos
         tipo = str(memoria.get("tipo_evento") or "").lower()
         if not memoria.get("nome_homenageado"):
             if "casamento" in tipo: return RoteirosPablo.CONFIRMA_CASAMENTO
             elif "anivers" in tipo or "15 anos" in tipo: return RoteirosPablo.CONFIRMA_ANIVERSARIO
             elif "corporativo" in tipo or "confrat" in tipo: return RoteirosPablo.CONFIRMA_CORP_SEM_EMPRESA
 
-        # Se passou por tudo, Gatilho final.
         memoria["pre_proposta_enviada"] = True
         return RoteirosPablo.PRE_PROPOSTA
 
@@ -269,11 +279,11 @@ chat_history = dados_do_banco["chat_history"]
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V9 - Alta Granularidade]")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V10 - IA Híbrida]")
     st.caption(f"A conversar com: `{numero_lead}` (Dados persistidos no SQLite)")
 
-    nlu = NLUEngine()
-    fsm = PabloFSM()
+    ai = AIEngine()
+    fsm = PabloFSM(ai)
 
     for msg in chat_history:
         avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
@@ -287,12 +297,13 @@ with col_chat:
         
         db.save_lead(numero_lead, memoria_lead, chat_history)
 
-        with st.spinner("Lendo banco de dados e processando IA..."):
-            analise_json = nlu.analisar_mensagem(chat_history)
+        with st.spinner("Processando Inteligência Híbrida (Triagem ou Conversação)..."):
+            analise_json = ai.analisar_mensagem(chat_history)
             resposta_oficial = fsm.processar_estado(
                 intencao=analise_json.get("intencao", "informacao"),
                 entidades=analise_json.get("entidades", {}),
-                memoria=memoria_lead
+                memoria=memoria_lead,
+                historico=chat_history
             )
 
         with st.chat_message("assistant", avatar="🤖"):
