@@ -35,25 +35,22 @@ class RoteirosPablo:
     
     PRE_PROPOSTA = "Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo \"passear\" por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema"
     
-    # Adicionado o script Padrão do documento de vendas
-    PROPOSTA_PADRAO = "{nome_cliente}, segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
+    PONTE_CONVERSACIONAL = "Perfeito! Vou separar alguns materiais nossos para te enviar, assim vocês conseguem sentir um pouco mais da nossa energia. 🎶\n\nE conforme conversamos, "
+    PROPOSTA_PADRAO = "{saudacao}segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\n\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\n\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
 
 # ======================================================================
 # 3. CAMADA DE INFRAESTRUTURA NLU (Extração JSON isolada)
 # ======================================================================
 class NLUEngine:
     EXTRACTION_PROMPT = """
-    Você é um extrator de dados JSON. Leia o histórico da conversa e a última mensagem do usuário.
+    Você é um extrator de dados JSON. Leia o histórico da conversa.
     Extraia as informações e atualize o estado. NÃO gere texto. Responda APENAS em JSON válido.
 
-    REGRAS DE EXTRAÇÃO:
-    - "intencao": Use "oi_simples" se ele cumprimentou sem pedir nada. Use "orcamento" se quer valores. Use "informacao" se deu dados.
-    - "nome_cliente": O nome do cliente, se informado.
-    - "tipo_evento": (ex: Casamento, Corporativo, Aniversário).
-    - "data": Data exata. Se faltar o ano, deixe null.
-    - "local": Cidade e Casa de Festas. Se faltar a casa, deixe null.
-    - "horario_show": Horário DO SHOW.
-    - "nome_homenageado": Nome do casal/aniversariante/empresa.
+    REGRAS CRÍTICAS DE EXTRAÇÃO:
+    - "data": Mantenha EXATAMENTE o formato natural escrito pelo cliente (ex: "18 de dezembro de 2026"). NÃO use padrão ISO (YYYY-MM-DD).
+    - "horario_show": Mantenha EXATAMENTE o formato natural (ex: "22 horas", "10 da noite").
+    - "nome_cliente": O nome da pessoa com quem você está falando. Se ela disser "meu nome é X", preencha aqui.
+    - "intencao": Use "oi_simples" se cumprimentou sem pedir nada. Use "orcamento" se quer valores. Use "informacao" se deu dados.
 
     FORMATO DE SAÍDA OBRIGATÓRIO:
     {
@@ -93,13 +90,18 @@ class PabloFSM:
             if v and str(v).lower() not in ["null", "none"]:
                 memoria[k] = v
 
+        # FALLBACK INTELIGENTE DE NOME: Se o lead não deu nome de cliente, mas deu do homenageado, usamos.
         nome_raw = memoria.get("nome_cliente")
-        nome = str(nome_raw).strip() if nome_raw else ""
+        if not nome_raw and memoria.get("nome_homenageado"):
+            nome_raw = memoria.get("nome_homenageado")
+            
+        nome = str(nome_raw).strip() if nome_raw and str(nome_raw).lower() not in ["null", "none"] else ""
         tratamento_nome = f" {nome}" if nome else ""
+        saudacao_proposta = f"{nome}, " if nome else ""
 
         # TRANSIÇÃO 1: ESTADO TERMINAL (Fluxo Concluído)
         if memoria.get("proposta_enviada"):
-            return "✅ *[SISTEMA]* O fluxo de triagem autônoma foi concluído e a proposta foi apresentada. A partir deste ponto, a negociação de repertório e valores requer interação humana."
+            return "✅ *[SISTEMA]* O fluxo de triagem autônoma foi concluído e a proposta foi apresentada."
 
         # TRANSIÇÃO 2: ENVIO DA PROPOSTA
         if memoria.get("pre_proposta_enviada"):
@@ -111,12 +113,13 @@ class PabloFSM:
             horario = str(memoria.get("horario_show", "")).strip()
             local = str(memoria.get("local", "")).strip()
             
-            return RoteirosPablo.PROPOSTA_PADRAO.format(
-                nome_cliente=tratamento_nome,
+            proposta_texto = RoteirosPablo.PROPOSTA_PADRAO.format(
+                saudacao=saudacao_proposta,
                 evento=evento,
                 data_horario=f"{data} às {horario}",
                 local=local
-            ).replace(" .", ".")
+            )
+            return RoteirosPablo.PONTE_CONVERSACIONAL + proposta_texto
 
         # TRANSIÇÃO 3: SAUDAÇÃO
         if intencao == "oi_simples" and not memoria.get("ja_se_apresentou"):
@@ -158,8 +161,8 @@ class PabloFSM:
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V4 - FSM]")
-    st.caption("Arquitetura FSM Estrita com Estado Terminal e Envio de Proposta[cite: 2].")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V5 - FSM]")
+    st.caption("Arquitetura FSM Estrita com Formatação Humana e Transições Orgânicas.")
 
     nlu = NLUEngine()
     fsm = PabloFSM()
