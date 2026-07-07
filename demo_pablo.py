@@ -21,7 +21,7 @@ class Config:
 # 2. CAMADA DE NEGÓCIOS: ROTEIROS EXATOS DO DOCUMENTO
 # ======================================================================
 class RoteirosPablo:
-    """Strings imutáveis retiradas literalmente do manual comercial."""
+    """Strings imutáveis retiradas literalmente do manual comercial de Rafa Cout."""
     
     SAUDACAO_SIMPLES = "Boa tarde{nome_cliente}. Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
     ORCAMENTO_SEM_DADOS_NOVO = "Olá{nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
@@ -32,7 +32,11 @@ class RoteirosPablo:
     CONFIRMA_CORP_SEM_EMPRESA = "Pode me informar o nome da empresa e do evento para que eu possa colocar corretamente na proposta e em nossa agenda?"
     CONFIRMA_CASAMENTO = "Pode me informar o nome do casal para que eu possa colocar corretamente na proposta e em nossa agenda?"
     CONFIRMA_ANIVERSARIO = "Pode me informar o nome do/da aniversariante que eu possa colocar corretamente na proposta e em nossa agenda?"
+    
     PRE_PROPOSTA = "Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo \"passear\" por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema"
+    
+    # Adicionado o script Padrão do documento de vendas
+    PROPOSTA_PADRAO = "{nome_cliente}, segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
 
 # ======================================================================
 # 3. CAMADA DE INFRAESTRUTURA NLU (Extração JSON isolada)
@@ -89,15 +93,37 @@ class PabloFSM:
             if v and str(v).lower() not in ["null", "none"]:
                 memoria[k] = v
 
-        # PROTEÇÃO DE TIPO (Blindagem contra NoneType)
         nome_raw = memoria.get("nome_cliente")
         nome = str(nome_raw).strip() if nome_raw else ""
         tratamento_nome = f" {nome}" if nome else ""
 
-        if intencao == "oi_simples" and not memoria["ja_se_apresentou"]:
-            memoria["ja_se_apresentou"] = True
-            return RoteirosPablo.SAUDACAO_SIMPLES.format(nome_cliente=tratamento_nome)
+        # TRANSIÇÃO 1: ESTADO TERMINAL (Fluxo Concluído)
+        if memoria.get("proposta_enviada"):
+            return "✅ *[SISTEMA]* O fluxo de triagem autônoma foi concluído e a proposta foi apresentada. A partir deste ponto, a negociação de repertório e valores requer interação humana."
 
+        # TRANSIÇÃO 2: ENVIO DA PROPOSTA
+        if memoria.get("pre_proposta_enviada"):
+            memoria["proposta_enviada"] = True
+            
+            evento_raw = memoria.get("tipo_evento", "evento")
+            evento = str(evento_raw).strip() if evento_raw else "evento"
+            data = str(memoria.get("data", "")).strip()
+            horario = str(memoria.get("horario_show", "")).strip()
+            local = str(memoria.get("local", "")).strip()
+            
+            return RoteirosPablo.PROPOSTA_PADRAO.format(
+                nome_cliente=tratamento_nome,
+                evento=evento,
+                data_horario=f"{data} às {horario}",
+                local=local
+            ).replace(" .", ".")
+
+        # TRANSIÇÃO 3: SAUDAÇÃO
+        if intencao == "oi_simples" and not memoria.get("ja_se_apresentou"):
+            memoria["ja_se_apresentou"] = True
+            return RoteirosPablo.SAUDACAO_SIMPLES.format(nome_cliente=tratamento_nome).replace(" .", ".")
+
+        # TRANSIÇÃO 4: AVALIAÇÃO DE DADOS FALTANTES
         campos_faltantes = []
         if not memoria.get("tipo_evento"): campos_faltantes.append("Nome do evento")
         if not memoria.get("data"): campos_faltantes.append("Data completa (com ano)")
@@ -106,21 +132,24 @@ class PabloFSM:
 
         if campos_faltantes:
             texto_faltantes = ", ".join(campos_faltantes)
-            if len(campos_faltantes) == 4 and not memoria["ja_se_apresentou"]:
+            if len(campos_faltantes) == 4 and not memoria.get("ja_se_apresentou"):
                 memoria["ja_se_apresentou"] = True
-                return RoteirosPablo.ORCAMENTO_SEM_DADOS_NOVO.format(nome_cliente=tratamento_nome)
-            elif not memoria["ja_se_apresentou"]:
+                return RoteirosPablo.ORCAMENTO_SEM_DADOS_NOVO.format(nome_cliente=tratamento_nome).replace(" .", ".")
+            elif not memoria.get("ja_se_apresentou"):
                 memoria["ja_se_apresentou"] = True
-                return RoteirosPablo.PARCIAL_NOVO.format(nome_cliente=tratamento_nome, campos_faltantes=texto_faltantes)
+                return RoteirosPablo.PARCIAL_NOVO.format(nome_cliente=tratamento_nome, campos_faltantes=texto_faltantes).replace(" .", ".")
             else:
                 return RoteirosPablo.PARCIAL_CONTINUACAO.format(campos_faltantes=texto_faltantes)
 
+        # TRANSIÇÃO 5: MICRO-VALIDAÇÕES
         tipo = str(memoria.get("tipo_evento") or "").lower()
         if not memoria.get("nome_homenageado"):
             if "casamento" in tipo: return RoteirosPablo.CONFIRMA_CASAMENTO
             elif "anivers" in tipo or "15 anos" in tipo: return RoteirosPablo.CONFIRMA_ANIVERSARIO
             elif "corporativo" in tipo: return RoteirosPablo.CONFIRMA_CORP_SEM_EMPRESA
 
+        # TRANSIÇÃO 6: GATILHO DA PRÉ-PROPOSTA
+        memoria["pre_proposta_enviada"] = True
         return RoteirosPablo.PRE_PROPOSTA
 
 # ======================================================================
@@ -129,16 +158,23 @@ class PabloFSM:
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V3 - FSM]")
-    st.caption("Arquitetura FSM Estrita ativada e blindada contra falhas de tipagem.")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V4 - FSM]")
+    st.caption("Arquitetura FSM Estrita com Estado Terminal e Envio de Proposta[cite: 2].")
 
     nlu = NLUEngine()
     fsm = PabloFSM()
 
     if "memoria_lead" not in st.session_state:
         st.session_state.memoria_lead = {
-            "ja_se_apresentou": False, "nome_cliente": None, "tipo_evento": None,
-            "data": None, "local": None, "horario_show": None, "nome_homenageado": None
+            "ja_se_apresentou": False,
+            "pre_proposta_enviada": False,
+            "proposta_enviada": False,
+            "nome_cliente": None, 
+            "tipo_evento": None,
+            "data": None, 
+            "local": None, 
+            "horario_show": None, 
+            "nome_homenageado": None
         }
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
