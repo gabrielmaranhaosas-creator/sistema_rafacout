@@ -22,7 +22,7 @@ class Config:
 # 2. CAMADA DE NEGÓCIOS: ROTEIROS EXATOS DO DOCUMENTO
 # ======================================================================
 class RoteirosPablo:
-    """Strings imutáveis, agora com injeção dinâmica de tempo e formatação limpa."""
+    """Strings imutáveis, agora com Estado de Pós-Proposta (Human Handoff)."""
     
     SAUDACAO_SIMPLES = "{saudacao_tempo}{nome_cliente}! Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
     ORCAMENTO_SEM_DADOS_NOVO = "{saudacao_tempo}{nome_cliente}! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
@@ -37,7 +37,12 @@ class RoteirosPablo:
     PRE_PROPOSTA = "Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo \"passear\" por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema"
     
     PONTE_CONVERSACIONAL = "Perfeito! Vou separar alguns materiais nossos para te enviar, assim vocês conseguem sentir um pouco mais da nossa energia. 🎶\n\nE conforme conversamos, "
-    PROPOSTA_PADRAO = "{saudacao_proposta}segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\n\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\n\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
+    
+    # Adicionado o Mock de Anexo de PDF
+    PROPOSTA_PADRAO = "{saudacao_proposta}segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\n\n*[📎 ARQUIVO PDF ANEXADO: Proposta_Rafa_Cout.pdf]*\n\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\n\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
+    
+    # Novo Roteiro: Graceful Degradation pós-envio
+    POS_PROPOSTA_FALLBACK = "Opa! O arquivo em PDF com todos os valores e detalhes da estrutura foi enviado logo acima. 👆 Consegue visualizar por aí? Qualquer dúvida sobre a proposta, é só me falar! 😊"
 
 # ======================================================================
 # 3. CAMADA DE INFRAESTRUTURA NLU (Extração JSON isolada)
@@ -91,7 +96,6 @@ class PabloFSM:
             if v and str(v).lower() not in ["null", "none"]:
                 memoria[k] = v
 
-        # 1. BLOQUEIO DE ALUCINAÇÃO DE IDENTIDADE (Sanitização)
         nome_raw = memoria.get("nome_cliente")
         if nome_raw and str(nome_raw).strip().lower() in ["pablo", "rafa", "rafa cout"]:
             nome_raw = None
@@ -101,20 +105,18 @@ class PabloFSM:
             if str(memoria.get("nome_homenageado")).strip().lower() not in ["pablo", "rafa", "rafa cout"]:
                 nome_raw = memoria.get("nome_homenageado")
 
-        # 2. MOTOR TEMPORAL (Calcula a saudação em tempo real pelo fuso de Recife UTC-3)
         hora_atual = (datetime.utcnow() - timedelta(hours=3)).hour
         if hora_atual < 12: saudacao_tempo = "Bom dia"
         elif hora_atual < 18: saudacao_tempo = "Boa tarde"
         else: saudacao_tempo = "Boa noite"
 
-        # 3. TRATAMENTO DE TEXTO (Title Casing)
         nome = str(nome_raw).strip().title() if nome_raw and str(nome_raw).lower() not in ["null", "none"] else ""
         tratamento_nome = f", {nome}" if nome else ""
         saudacao_proposta = f"{nome}, " if nome else ""
 
-        # TRANSIÇÃO 1: ESTADO TERMINAL (Fluxo Concluído)
+        # TRANSIÇÃO 1: ESTADO PÓS-PROPOSTA (Human Handoff Graceful Degradation)
         if memoria.get("proposta_enviada"):
-            return "✅ *[SISTEMA]* O fluxo de triagem autônoma foi concluído e a proposta foi apresentada."
+            return RoteirosPablo.POS_PROPOSTA_FALLBACK
 
         # TRANSIÇÃO 2: ENVIO DA PROPOSTA
         if memoria.get("pre_proposta_enviada"):
@@ -174,8 +176,8 @@ class PabloFSM:
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V6 - FSM]")
-    st.caption("FSM c/ Sanitização de Identidade e Motor Temporal Inteligente.")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V7 - FSM]")
+    st.caption("FSM c/ Mock de Payload PDF e Fallback Pós-Proposta Humanizado.")
 
     nlu = NLUEngine()
     fsm = PabloFSM()
