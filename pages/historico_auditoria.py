@@ -1,48 +1,66 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import os
 
-st.set_page_config(page_title="Centro de Telemetria V8", layout="wide")
+# ==========================================
+# 1. CONFIGURAÇÃO DA PÁGINA
+# ==========================================
+st.set_page_config(page_title="Telemetria V8", page_icon="📊", layout="wide")
+st.title("📊 Centro de Telemetria - Histórico")
+st.caption("Auditoria em tempo real de todas as instâncias de teste e produção.")
 
-st.title("📊 Centro de Telemetria - Histórico de Auditoria")
-st.markdown("Auditoria em tempo real de todas as instâncias de teste e produção.")
-
-# Conexão com o banco de dados (ajuste o caminho se necessário)
 DB_PATH = "sistema_rafacout.db"
 
-def carregar_dados():
-    conn = sqlite3.connect(DB_PATH)
-    # Recupera todos os leads e suas mensagens
-    query = """
-    SELECT l.wa_id, l.name, m.role, m.message, m.timestamp 
-    FROM leads l
-    JOIN mensagens m ON l.wa_id = m.wa_id
-    ORDER BY m.timestamp DESC
+# ==========================================
+# 2. MOTOR DE LEITURA BLINDADO
+# ==========================================
+def carregar_dados_auditoria():
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
-
-try:
-    df = carregar_dados()
-    
-    # Sidebar para filtragem
-    st.sidebar.header("Filtros de Auditoria")
-    cliente_filtro = st.sidebar.selectbox("Selecionar Cliente/Lead", ["Todos"] + df['name'].unique().tolist())
-    
-    if cliente_filtro != "Todos":
-        df = df[df['name'] == cliente_filtro]
+    Lê os dados do banco SQLite de forma síncrona para o Streamlit.
+    Possui travas de segurança para evitar erros se o banco ou tabelas não existirem.
+    """
+    if not os.path.exists(DB_PATH):
+        return None
         
-    # Visualização
-    for wa_id in df['wa_id'].unique():
-        cliente_nome = df[df['wa_id'] == wa_id]['name'].iloc[0]
-        with st.expander(f"Cliente: {cliente_nome} | ID: {wa_id}"):
-            chat_session = df[df['wa_id'] == wa_id]
-            for index, row in chat_session.iterrows():
-                with st.chat_message(row['role']):
-                    st.write(row['message'])
-                    st.caption(f"Horário: {row['timestamp']}")
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        
+        # Trava de Segurança: Verifica se a tabela chat_history existe antes de buscar
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history';")
+        if cursor.fetchone() is None:
+            return None # A tabela ainda não foi criada
+            
+        # Query adaptada para a sua estrutura real (leads + chat_history)
+        query = """
+        SELECT 
+            l.wa_id AS "ID WhatsApp", 
+            l.name AS "Nome do Lead", 
+            c.role AS "Remetente", 
+            c.content AS "Mensagem", 
+            c.timestamp AS "Data/Hora"
+        FROM leads l
+        JOIN chat_history c ON l.wa_id = c.wa_id
+        ORDER BY c.timestamp DESC
+        """
+        df = pd.read_sql_query(query, conn)
+        return df
+        
+    except Exception as e:
+        st.error(f"Falha na leitura do banco de dados: {e}")
+        return None
+    finally:
+        conn.close()
 
-except Exception as e:
-    st.error(f"Erro ao carregar o histórico: {e}")
-    st.info("Verifique se o servidor está rodando e se o banco de dados existe.")
+# ==========================================
+# 3. RENDERIZAÇÃO DO DASHBOARD
+# ==========================================
+df_historico = carregar_dados_auditoria()
+
+if df_historico is not None and not df_historico.empty:
+    # Exibe a tabela bonitona ocupando a tela toda
+    st.dataframe(df_historico, use_container_width=True, hide_index=True)
+else:
+    # Se o banco estiver vazio, mostra um aviso amigável em vez de erro
+    st.info("Nenhum histórico de conversa registrado no banco de dados até o momento. Inicie um atendimento para popular a telemetria.")
