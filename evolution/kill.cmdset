@@ -1,0 +1,1 @@
+@echo off  NODE_OPTIONS=--experimental-global-webcryptonpm start

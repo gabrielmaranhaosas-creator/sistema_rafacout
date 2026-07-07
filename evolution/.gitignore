@@ -1,0 +1,40 @@
+# --- Sistema e Logs ---
+.DS_Store
+*.log
+logs/**.json
+temp/*
+*.tmp
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+*.env
+.env.local
+
+# --- Banco de Dados e Artefatos Gerados ---
+*.db
+*.sqlite
+*.sqlite3
+propostas/*.pdf
+
+# --- IDEs ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.nova/*
+
+# --- Projeto Rafa Cout ---
+/instances/*
+!/instances/.gitkeep
+/test/
+/src/env.yml
+/store
+.tool-versions
+*.db

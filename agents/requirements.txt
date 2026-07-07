@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+groq
+tenacity
+fpdf
+streamlit
+pandas
+python-dotenv
