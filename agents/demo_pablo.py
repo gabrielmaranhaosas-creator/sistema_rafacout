@@ -13,15 +13,14 @@ st.set_page_config(
 )
 
 st.title("📱 Atendimento Oficial - Rafa Cout")
-st.caption("Motor V8 de Triagem: Réplica exata do manual de vendas. Coleira curta ativada.")
+st.caption("Motor V8: Com injeção dinâmica de contexto via Python para bloqueio de loops.")
 st.divider()
 
 # ==========================================
-# 2. INICIALIZAÇÃO DO MOTOR DE INFERÊNCIA
+# 2. INICIALIZAÇÃO DO MOTOR
 # ==========================================
 @st.cache_resource
 def iniciar_cliente_groq():
-    """Inicializa o cliente Groq com proteção de chave via Secrets."""
     chave = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
     if not chave:
         st.error("🚨 Falha de Autenticação: A chave GROQ_API_KEY não foi encontrada nos Secrets.")
@@ -31,60 +30,44 @@ def iniciar_cliente_groq():
 client = iniciar_cliente_groq()
 
 # ==========================================
-# 3. CORE COGNITIVO (MÁQUINA DE ESTADOS ABSOLUTA)
+# 3. CORE COGNITIVO (BASE DINÂMICA)
 # ==========================================
-# O Prompt foi transformado em uma árvore de decisão estrita, proibindo o LLM de "pensar" fora do script.
-SYSTEM_PROMPT = """
-Você é Pablo Bezerra, empresário do cantor Rafa Cout. Você é um robô de triagem comercial operando no WhatsApp.
-Seu comportamento não é o de um assistente de IA prestativo, mas sim de um negociador direto, seguindo roteiros exatos.
+# Retiramos as condicionais falhas. A lógica será injetada em tempo de execução.
+BASE_PROMPT = """
+Você é Pablo Bezerra, empresário do cantor Rafa Cout. Seu objetivo é triagem comercial via WhatsApp.
 
-# 1. REGRAS ABSOLUTAS DE COMPORTAMENTO (RISCO DE FALHA SE DESOBEDECIDAS)
-- É EXPRESSAMENTE PROIBIDO inventar qualquer palavra, frase de apoio, consolação ou encerramento que não esteja nos roteiros abaixo.
-- NUNCA emende duas mensagens. Envie uma resposta e aguarde o cliente.
-- NUNCA repita "Aqui é o Pablo" ou "Sou o empresário" se já disse isso antes no histórico.
-- Mantenha a pontuação e os emojis exatamente como fornecidos nos roteiros.
+# 1. OS 4 PILARES DA TRIAGEM (NUNCA AVANCE SEM ELES)
+1. NOME/TIPO DO EVENTO: (Casamento, Corporativo, Aniversário, etc.)
+2. DATA: Dia, mês e ano.
+3. LOCAL: Cidade e nome da casa de festas.
+4. HORÁRIO: Início do show.
 
-# 2. OBJETIVO DA TRIAGEM (OS 4 PILARES)
-Você precisa extrair e validar estas 4 informações essenciais:
-1. NOME/TIPO DO EVENTO: (Ex: Casamento, Corporativo, Aniversário, Formatura, 15 Anos, Evento Público).
-2. DATA: Dia, mês e ano. (Se o ano faltar, você deve obrigatoriamente perguntar se é do ano corrente).
-3. LOCAL: Cidade e nome exato da casa de festas (ou endereço se for residência).
-4. HORÁRIO: Horário de início do show (não da festa).
+# 2. ROTEIROS DE RESPOSTA (USE AS PALAVRAS EXATAS DO ROTEIRO, NÃO INVENTE)
 
-# 3. ÁRVORE DE DECISÃO E ROTEIROS EXATOS (COPIE E COLE)
+SITUAÇÃO A - Cliente disse APENAS "Oi": 
+"Boa tarde! Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar? 😊"
 
-## ESTADO 1: O CLIENTE SÓ DISSE "OI", "BOM DIA", "BOA TARDE"
-- Responda EXATAMENTE: "Boa tarde [NOME DO CLIENTE, se ele informou, senão omita]. Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
+SITUAÇÃO B - Faltam dados na solicitação de orçamento:
+"Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: [INSERIR APENAS O QUE FALTA AQUI]. Consegue me passar? 😃"
 
-## ESTADO 2: O CLIENTE PEDIU ORÇAMENTO MAS NÃO DEU NENHUMA INFORMAÇÃO
-- Avalie o histórico. Se você AINDA NÃO SE APRESENTOU, responda:
-  "Olá. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
-- Se você JÁ SE APRESENTOU, responda apenas:
-  "Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
+SITUAÇÃO C - Cliente enviou tudo, mas exige micro-validação (faça uma por vez):
+- Horário: "Para confirmar a disponibilidade, o horário que você me informou é de início da festa ou de início do nosso show? 😊"
+- Local: "Pode me confirmar o local exato (nome da casa de festas) do evento? 😃"
+- Corporativo (sem empresa): "Pode me informar o nome da empresa e do evento para que eu possa colocar na proposta?"
+- Casamento: "Pode me informar o nome do casal?"
+- Aniversário: "Pode me informar o nome da(o) aniversariante?"
 
-## ESTADO 3: O CLIENTE DEU INFORMAÇÕES PARCIAIS (Faltam 1 a 3 pilares)
-- Avalie o histórico. Se você AINDA NÃO SE APRESENTOU, inicie com "Olá. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações:"
-- Se JÁ SE APRESENTOU, inicie com "Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações:"
-- COMPLETE A FRASE EXATAMENTE COM O QUE FALTA. Exemplo: "[Data, confirmando o ano], [Local exato] e [Horário previsto para o show]. Consegue me passar?"
+SITUAÇÃO D - Cliente não sabe / vai pensar:
+"Perfeito! Fico no aguardo das informações para podermos dar andamento. Qualquer dúvida, estou à disposição! 😊"
 
-## ESTADO 4: O CLIENTE PARECE TER DADO TUDO, MAS EXIGE MICRO-VALIDAÇÃO
-Se os 4 pilares foram respondidos, você deve fazer as seguintes validações (uma por vez) antes de fechar:
-- Se o horário não é de madrugada, pergunte: "Para confirmar a disponibilidade, o horário que você me informou é de início da festa ou de início do nosso show?"
-- Se o local for só a cidade, pergunte: "Pode me confirmar o local exato do evento?"
-- Se for Corporativo (sem nome da empresa): "Pode me informar o nome da empresa e do evento para que eu possa colocar corretamente na proposta e em nossa agenda?"
-- Se for Casamento: "Pode me informar o nome do casal para que eu possa colocar corretamente na proposta e em nossa agenda?"
-- Se for Aniversário/15 anos: "Pode me informar o nome da(o) aniversariante que eu possa colocar corretamente na proposta e em nossa agenda?"
+SITUAÇÃO E - Gatilho Final (Tudo validado):
+"Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo 'passear' por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema? 😊"
 
-## ESTADO 5: O CLIENTE DISSE QUE VAI CONFIRMAR, PENSAR, OU NÃO SABE AINDA
-- Responda EXATAMENTE: "Perfeito! Fico no aguardo das informações para podermos dar andamento. Qualquer dúvida, estou à disposição! 😊"
+# 3. REGRAS ABSOLUTAS
+- NUNCA emende duas situações em uma única mensagem.
+- {INJECAO_DINAMICA_DE_SAUDACAO}
 
-## ESTADO 6: TUDO FOI VALIDADO (GATILHO DE PRÉ-PROPOSTA)
-- Quando não houver mais nenhuma validação pendente, envie EXATAMENTE:
-  "Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo 'passear' por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema"
-- IMPORTANTE: Após enviar o Estado 6, a sua missão está concluída. Encerre o assunto.
-
-# 4. PROTOCOLO DE AUDITORIA INTERNA (TAGS INVISÍVEIS OBRIGATÓRIAS)
-Ao final de absolutamente todas as suas respostas, pule duas linhas e imprima o status atualizado da coleta de dados usando estritamente o formato abaixo. Use 'Não informado' para o que faltar.
+# 4. TAGS OBRIGATÓRIAS (Pule 2 linhas no final e imprima)
 [TIPO_EVENTO: valor]
 [DATA: valor]
 [LOCAL: valor]
@@ -94,34 +77,51 @@ Ao final de absolutamente todas as suas respostas, pule duas linhas e imprima o 
 # ==========================================
 # 4. GERENCIAMENTO DE MEMÓRIA DE SESSÃO
 # ==========================================
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+# Separamos o chat_history das mensagens da API para podermos manipular o System Prompt
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 # Renderiza o chat na interface
-for msg in st.session_state.messages:
-    if msg["role"] != "system":
-        avatar_icon = "🧑‍💻" if msg["role"] == "user" else "🤖"
-        with st.chat_message(msg["role"], avatar=avatar_icon):
-            st.markdown(msg["content"])
+for msg in st.session_state.chat_history:
+    avatar_icon = "🧑‍💻" if msg["role"] == "user" else "🤖"
+    with st.chat_message(msg["role"], avatar=avatar_icon):
+        st.markdown(msg["content"])
 
 # ==========================================
-# 5. EXECUÇÃO DO MOTOR (I/O)
+# 5. EXECUÇÃO DO MOTOR COM INJEÇÃO DINÂMICA
 # ==========================================
 if prompt := st.chat_input("Mensagem do cliente (Ex: Oi, Quero um orçamento, etc...)"):
     
-    # Renderiza entrada do usuário
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
     
-    # Atualiza memória
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
+    
+    # ---------------------------------------------------------
+    # A MÁGICA ARQUITETURAL ACONTECE AQUI
+    # ---------------------------------------------------------
+    # O Python verifica fisicamente se a palavra "Pablo" já existe nas respostas do bot
+    ja_se_apresentou = any("Pablo" in msg["content"] for msg in st.session_state.chat_history if msg["role"] == "assistant")
+    
+    if ja_se_apresentou:
+        # Se já se apresentou, bloqueamos o LLM de gerar qualquer saudação novamente
+        trava = "REGRA CRÍTICA: Você JÁ se apresentou. É EXPRESSAMENTE PROIBIDO escrever 'Aqui é o Pablo', 'Meu nome é Pablo' ou 'Obrigado pelo contato'. Comece a frase DIRETAMENTE respondendo o cliente ou pedindo os dados."
+    else:
+        # Se é a primeira mensagem e ele pediu orçamento direto, forçamos a saudação
+        trava = "REGRA CRÍTICA: É o seu primeiro contato. Se o cliente já pediu orçamento, INICIE a frase com 'Olá! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato.' ANTES de ir para a SITUAÇÃO B."
+
+    # Substitui a tag no prompt base pela regra calculada agora
+    system_prompt_calculado = BASE_PROMPT.replace("{INJECAO_DINAMICA_DE_SAUDACAO}", trava)
+    
+    # Monta a lista final para a API (Prompt recém calculado + Histórico do usuário)
+    api_messages = [{"role": "system", "content": system_prompt_calculado}] + st.session_state.chat_history
     
     try:
-        with st.spinner("Processando lógica de negócios..."):
+        with st.spinner("Processando lógica..."):
             chat_completion = client.chat.completions.create(
-                messages=st.session_state.messages,
+                messages=api_messages,
                 model="llama-3.3-70b-versatile",
-                temperature=0.0, # Criatividade estritamente zero para forçar o copy-paste dos roteiros
+                temperature=0.0,
                 max_tokens=600,
                 presence_penalty=0.0,
                 frequency_penalty=0.0
@@ -129,13 +129,10 @@ if prompt := st.chat_input("Mensagem do cliente (Ex: Oi, Quero um orçamento, et
             
         resposta_ia = chat_completion.choices[0].message.content
         
-        # Renderiza resposta do sistema
         with st.chat_message("assistant", avatar="🤖"):
             st.markdown(resposta_ia)
             
-        # Salva no histórico para evitar loops e esquecimentos
-        st.session_state.messages.append({"role": "assistant", "content": resposta_ia})
+        st.session_state.chat_history.append({"role": "assistant", "content": resposta_ia})
         
     except Exception as e:
         st.error(f"Falha Crítica no Motor de Inferência: {str(e)}")
-        st.info("Diagnóstico: Verifique a conexão de rede ou a validade da GROQ_API_KEY no painel.")
