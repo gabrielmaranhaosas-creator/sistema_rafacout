@@ -21,11 +21,11 @@ class Config:
 # 2. CAMADA DE NEGÓCIOS: ROTEIROS EXATOS DO DOCUMENTO
 # ======================================================================
 class RoteirosPablo:
-    """Strings imutáveis retiradas literalmente do manual comercial de Rafa Cout."""
+    """Strings imutáveis retiradas literalmente do manual comercial."""
     
-    SAUDACAO_SIMPLES = "Boa tarde {nome_cliente}. Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
-    ORCAMENTO_SEM_DADOS_NOVO = "Olá, {nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
-    PARCIAL_NOVO = "Olá, {nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
+    SAUDACAO_SIMPLES = "Boa tarde{nome_cliente}. Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
+    ORCAMENTO_SEM_DADOS_NOVO = "Olá{nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
+    PARCIAL_NOVO = "Olá{nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
     PARCIAL_CONTINUACAO = "Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
     CONFIRMA_HORARIO = "Para confirmar a disponibilidade, o horário que você me informou é de início da festa ou de início do nosso show?"
     CONFIRMA_LOCAL = "Pode me confirmar o local exato do evento?"
@@ -89,12 +89,14 @@ class PabloFSM:
             if v and str(v).lower() not in ["null", "none"]:
                 memoria[k] = v
 
-        nome = memoria.get("nome_cliente", "").strip()
+        # PROTEÇÃO DE TIPO (Blindagem contra NoneType)
+        nome_raw = memoria.get("nome_cliente")
+        nome = str(nome_raw).strip() if nome_raw else ""
         tratamento_nome = f" {nome}" if nome else ""
 
         if intencao == "oi_simples" and not memoria["ja_se_apresentou"]:
             memoria["ja_se_apresentou"] = True
-            return RoteirosPablo.SAUDACAO_SIMPLES.format(nome_cliente=tratamento_nome).replace(" .", ".")
+            return RoteirosPablo.SAUDACAO_SIMPLES.format(nome_cliente=tratamento_nome)
 
         campos_faltantes = []
         if not memoria.get("tipo_evento"): campos_faltantes.append("Nome do evento")
@@ -106,14 +108,14 @@ class PabloFSM:
             texto_faltantes = ", ".join(campos_faltantes)
             if len(campos_faltantes) == 4 and not memoria["ja_se_apresentou"]:
                 memoria["ja_se_apresentou"] = True
-                return RoteirosPablo.ORCAMENTO_SEM_DADOS_NOVO.format(nome_cliente=tratamento_nome).replace(" .", ".")
+                return RoteirosPablo.ORCAMENTO_SEM_DADOS_NOVO.format(nome_cliente=tratamento_nome)
             elif not memoria["ja_se_apresentou"]:
                 memoria["ja_se_apresentou"] = True
-                return RoteirosPablo.PARCIAL_NOVO.format(nome_cliente=tratamento_nome, campos_faltantes=texto_faltantes).replace(" .", ".")
+                return RoteirosPablo.PARCIAL_NOVO.format(nome_cliente=tratamento_nome, campos_faltantes=texto_faltantes)
             else:
                 return RoteirosPablo.PARCIAL_CONTINUACAO.format(campos_faltantes=texto_faltantes)
 
-        tipo = str(memoria.get("tipo_evento", "")).lower()
+        tipo = str(memoria.get("tipo_evento") or "").lower()
         if not memoria.get("nome_homenageado"):
             if "casamento" in tipo: return RoteirosPablo.CONFIRMA_CASAMENTO
             elif "anivers" in tipo or "15 anos" in tipo: return RoteirosPablo.CONFIRMA_ANIVERSARIO
@@ -127,9 +129,8 @@ class PabloFSM:
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    # A BALA TRAÇANTE ESTÁ AQUI
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V2 - FSM]")
-    st.caption("Arquitetura FSM Estrita ativada.")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V3 - FSM]")
+    st.caption("Arquitetura FSM Estrita ativada e blindada contra falhas de tipagem.")
 
     nlu = NLUEngine()
     fsm = PabloFSM()
@@ -152,7 +153,7 @@ with col_chat:
             st.markdown(prompt)
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
-        with st.spinner("Processando NLU..."):
+        with st.spinner("Processando NLU e Máquina de Estados..."):
             analise_json = nlu.analisar_mensagem(st.session_state.chat_history)
             resposta_oficial = fsm.processar_estado(
                 intencao=analise_json.get("intencao", "informacao"),
