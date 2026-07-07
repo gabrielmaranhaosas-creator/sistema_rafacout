@@ -2,6 +2,7 @@ import streamlit as st
 from groq import Groq
 import os
 import json
+from datetime import datetime, timedelta
 
 # ======================================================================
 # 1. CAMADA DE CONFIGURAÇÃO E INTERFACE WEB
@@ -21,11 +22,11 @@ class Config:
 # 2. CAMADA DE NEGÓCIOS: ROTEIROS EXATOS DO DOCUMENTO
 # ======================================================================
 class RoteirosPablo:
-    """Strings imutáveis retiradas literalmente do manual comercial de Rafa Cout."""
+    """Strings imutáveis, agora com injeção dinâmica de tempo e formatação limpa."""
     
-    SAUDACAO_SIMPLES = "Boa tarde{nome_cliente}. Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
-    ORCAMENTO_SEM_DADOS_NOVO = "Olá{nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
-    PARCIAL_NOVO = "Olá{nome_cliente}. Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
+    SAUDACAO_SIMPLES = "{saudacao_tempo}{nome_cliente}! Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
+    ORCAMENTO_SEM_DADOS_NOVO = "{saudacao_tempo}{nome_cliente}! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
+    PARCIAL_NOVO = "{saudacao_tempo}{nome_cliente}! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
     PARCIAL_CONTINUACAO = "Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
     CONFIRMA_HORARIO = "Para confirmar a disponibilidade, o horário que você me informou é de início da festa ou de início do nosso show?"
     CONFIRMA_LOCAL = "Pode me confirmar o local exato do evento?"
@@ -36,7 +37,7 @@ class RoteirosPablo:
     PRE_PROPOSTA = "Enquanto monto a proposta, deixa te perguntar: você já conhece o show de Rafa? Rafa tem um repertório bem abrangente, podendo \"passear\" por várias estilos (sertanejo, forró, axé, pagode, swingueira etc.). Nossa proposta é ser aquela banda que anima a pista ou mantém ela com a energia lá em cima. Posso mandar uma lista de repertório para vocês terem uma ideia e, caso fechem, podemos marcar uma reunião para falar especificamente sobre esse tema"
     
     PONTE_CONVERSACIONAL = "Perfeito! Vou separar alguns materiais nossos para te enviar, assim vocês conseguem sentir um pouco mais da nossa energia. 🎶\n\nE conforme conversamos, "
-    PROPOSTA_PADRAO = "{saudacao}segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\n\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\n\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
+    PROPOSTA_PADRAO = "{saudacao_proposta}segue a proposta para a realização do show de Rafa no {evento}, no dia *{data_horario}, no {local}.*\n\nMais uma vez agradecemos o interesse e espero podermos levar a energia de Rafa para esse dia tão especial.😃\n\nQualquer dúvida ou ajuda, estou à disposição. Fico no seu aguardo.😊"
 
 # ======================================================================
 # 3. CAMADA DE INFRAESTRUTURA NLU (Extração JSON isolada)
@@ -47,9 +48,9 @@ class NLUEngine:
     Extraia as informações e atualize o estado. NÃO gere texto. Responda APENAS em JSON válido.
 
     REGRAS CRÍTICAS DE EXTRAÇÃO:
-    - "data": Mantenha EXATAMENTE o formato natural escrito pelo cliente (ex: "18 de dezembro de 2026"). NÃO use padrão ISO (YYYY-MM-DD).
-    - "horario_show": Mantenha EXATAMENTE o formato natural (ex: "22 horas", "10 da noite").
-    - "nome_cliente": O nome da pessoa com quem você está falando. Se ela disser "meu nome é X", preencha aqui.
+    - "data": Mantenha EXATAMENTE o formato natural (ex: "18 de dezembro de 2026"). NÃO use padrão ISO.
+    - "horario_show": Mantenha EXATAMENTE o formato natural (ex: "22 horas", "1 da manhã").
+    - "nome_cliente": O nome da pessoa perguntando. REGRA ABSOLUTA: O SEU NOME É PABLO E O ARTISTA É RAFA. NUNCA atribua "Pablo" ou "Rafa" como nome do cliente. Se não souber, preencha com null.
     - "intencao": Use "oi_simples" se cumprimentou sem pedir nada. Use "orcamento" se quer valores. Use "informacao" se deu dados.
 
     FORMATO DE SAÍDA OBRIGATÓRIO:
@@ -90,13 +91,25 @@ class PabloFSM:
             if v and str(v).lower() not in ["null", "none"]:
                 memoria[k] = v
 
-        # FALLBACK INTELIGENTE DE NOME: Se o lead não deu nome de cliente, mas deu do homenageado, usamos.
+        # 1. BLOQUEIO DE ALUCINAÇÃO DE IDENTIDADE (Sanitização)
         nome_raw = memoria.get("nome_cliente")
-        if not nome_raw and memoria.get("nome_homenageado"):
-            nome_raw = memoria.get("nome_homenageado")
+        if nome_raw and str(nome_raw).strip().lower() in ["pablo", "rafa", "rafa cout"]:
+            nome_raw = None
+            memoria["nome_cliente"] = None
             
-        nome = str(nome_raw).strip() if nome_raw and str(nome_raw).lower() not in ["null", "none"] else ""
-        tratamento_nome = f" {nome}" if nome else ""
+        if not nome_raw and memoria.get("nome_homenageado"):
+            if str(memoria.get("nome_homenageado")).strip().lower() not in ["pablo", "rafa", "rafa cout"]:
+                nome_raw = memoria.get("nome_homenageado")
+
+        # 2. MOTOR TEMPORAL (Calcula a saudação em tempo real pelo fuso de Recife UTC-3)
+        hora_atual = (datetime.utcnow() - timedelta(hours=3)).hour
+        if hora_atual < 12: saudacao_tempo = "Bom dia"
+        elif hora_atual < 18: saudacao_tempo = "Boa tarde"
+        else: saudacao_tempo = "Boa noite"
+
+        # 3. TRATAMENTO DE TEXTO (Title Casing)
+        nome = str(nome_raw).strip().title() if nome_raw and str(nome_raw).lower() not in ["null", "none"] else ""
+        tratamento_nome = f", {nome}" if nome else ""
         saudacao_proposta = f"{nome}, " if nome else ""
 
         # TRANSIÇÃO 1: ESTADO TERMINAL (Fluxo Concluído)
@@ -108,13 +121,13 @@ class PabloFSM:
             memoria["proposta_enviada"] = True
             
             evento_raw = memoria.get("tipo_evento", "evento")
-            evento = str(evento_raw).strip() if evento_raw else "evento"
+            evento = str(evento_raw).strip().title() if evento_raw else "evento"
             data = str(memoria.get("data", "")).strip()
             horario = str(memoria.get("horario_show", "")).strip()
-            local = str(memoria.get("local", "")).strip()
+            local = str(memoria.get("local", "")).strip().title()
             
             proposta_texto = RoteirosPablo.PROPOSTA_PADRAO.format(
-                saudacao=saudacao_proposta,
+                saudacao_proposta=saudacao_proposta,
                 evento=evento,
                 data_horario=f"{data} às {horario}",
                 local=local
@@ -124,7 +137,7 @@ class PabloFSM:
         # TRANSIÇÃO 3: SAUDAÇÃO
         if intencao == "oi_simples" and not memoria.get("ja_se_apresentou"):
             memoria["ja_se_apresentou"] = True
-            return RoteirosPablo.SAUDACAO_SIMPLES.format(nome_cliente=tratamento_nome).replace(" .", ".")
+            return RoteirosPablo.SAUDACAO_SIMPLES.format(saudacao_tempo=saudacao_tempo, nome_cliente=tratamento_nome).replace(" .", ".")
 
         # TRANSIÇÃO 4: AVALIAÇÃO DE DADOS FALTANTES
         campos_faltantes = []
@@ -137,10 +150,10 @@ class PabloFSM:
             texto_faltantes = ", ".join(campos_faltantes)
             if len(campos_faltantes) == 4 and not memoria.get("ja_se_apresentou"):
                 memoria["ja_se_apresentou"] = True
-                return RoteirosPablo.ORCAMENTO_SEM_DADOS_NOVO.format(nome_cliente=tratamento_nome).replace(" .", ".")
+                return RoteirosPablo.ORCAMENTO_SEM_DADOS_NOVO.format(saudacao_tempo=saudacao_tempo, nome_cliente=tratamento_nome).replace(" .", ".")
             elif not memoria.get("ja_se_apresentou"):
                 memoria["ja_se_apresentou"] = True
-                return RoteirosPablo.PARCIAL_NOVO.format(nome_cliente=tratamento_nome, campos_faltantes=texto_faltantes).replace(" .", ".")
+                return RoteirosPablo.PARCIAL_NOVO.format(saudacao_tempo=saudacao_tempo, nome_cliente=tratamento_nome, campos_faltantes=texto_faltantes).replace(" .", ".")
             else:
                 return RoteirosPablo.PARCIAL_CONTINUACAO.format(campos_faltantes=texto_faltantes)
 
@@ -161,8 +174,8 @@ class PabloFSM:
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V5 - FSM]")
-    st.caption("Arquitetura FSM Estrita com Formatação Humana e Transições Orgânicas.")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V6 - FSM]")
+    st.caption("FSM c/ Sanitização de Identidade e Motor Temporal Inteligente.")
 
     nlu = NLUEngine()
     fsm = PabloFSM()
