@@ -25,13 +25,11 @@ class Config:
 # 1.5 CAMADA DE PERSISTÊNCIA (Repository Pattern c/ SQLite)
 # ======================================================================
 class LeadRepository:
-    """Gere a persistência da Máquina de Estados e do Histórico de Chat."""
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._init_db()
 
     def _init_db(self):
-        """Cria a tabela se não existir (Design orientado a Documentos JSON)."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -45,32 +43,32 @@ class LeadRepository:
             conn.commit()
 
     def get_lead(self, telefone: str) -> dict:
-        """Carrega a memória de um lead específico."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT estado_fsm_json, chat_history_json FROM leads WHERE telefone = ?", (telefone,))
             row = cursor.fetchone()
             
-            # Estado Inicial Padrão se for um Lead Novo
+            # Novo esquema de memória de alta granularidade (BUILD V9)
             estado_padrao = {
                 "ja_se_apresentou": False, "pre_proposta_enviada": False, "proposta_enviada": False,
                 "nome_cliente": None, "tipo_evento": None, "data": None, 
-                "local": None, "horario_show": None, "nome_homenageado": None
+                "cidade": None, "casa_festas": None, "horario_show": None, "nome_homenageado": None,
+                "local_perguntado": False, "horario_perguntado": False
             }
             chat_padrao = []
             
             if row:
-                estado_db = json.loads(row[0]) if row[0] else estado_padrao
+                estado_db = json.loads(row[0]) if row[0] else {}
                 chat_db = json.loads(row[1]) if row[1] else chat_padrao
-                return {"memoria_lead": estado_db, "chat_history": chat_db}
+                # Faz o merge para garantir que chaves novas (V9) existam em leads antigos (V8)
+                estado_mesclado = {**estado_padrao, **estado_db}
+                return {"memoria_lead": estado_mesclado, "chat_history": chat_db}
             
             return {"memoria_lead": estado_padrao, "chat_history": chat_padrao}
 
     def save_lead(self, telefone: str, memoria_lead: dict, chat_history: list):
-        """Guarda o novo estado (Upsert: Atualiza se existir, Cria se não)."""
         estado_json = json.dumps(memoria_lead, ensure_ascii=False)
         chat_json = json.dumps(chat_history, ensure_ascii=False)
-        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -84,7 +82,6 @@ class LeadRepository:
             conn.commit()
 
     def delete_lead(self, telefone: str):
-        """Hard delete para efeitos de simulação de testes."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM leads WHERE telefone = ?", (telefone,))
@@ -95,11 +92,11 @@ class LeadRepository:
 # ======================================================================
 class RoteirosPablo:
     SAUDACAO_SIMPLES = "{saudacao_tempo}{nome_cliente}! Meu nome é Pablo e sou o empresário de Rafa, tudo bem!? Obrigado pelo contato e interesse. Em que posso ajudar?"
-    ORCAMENTO_SEM_DADOS_NOVO = "{saudacao_tempo}{nome_cliente}! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Nome do evento, Data, Local e Horário previsto para o show. Consegue me passar?"
+    ORCAMENTO_SEM_DADOS_NOVO = "{saudacao_tempo}{nome_cliente}! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso de algumas informações: Tipo do evento (Casamento, Aniversário...), Data, Local e Horário previsto para o show. Consegue me passar?"
     PARCIAL_NOVO = "{saudacao_tempo}{nome_cliente}! Aqui é o Pablo, empresário de Rafa Cout, tudo bem?! Obrigado pelo contato. Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
     PARCIAL_CONTINUACAO = "Para confirmar a disponibilidade e passar a proposta, eu preciso complementar algumas informações: {campos_faltantes}. Consegue me passar?"
-    CONFIRMA_HORARIO = "Para confirmar a disponibilidade, o horário que você me informou é de início da festa ou de início do nosso show?"
-    CONFIRMA_LOCAL = "Pode me confirmar o local exato do evento?"
+    CONFIRMA_HORARIO = "Para confirmar a disponibilidade, o horário que você me informou é de início da festa ou de início do nosso show? 😊"
+    CONFIRMA_LOCAL = "Pode me confirmar o local exato (nome do espaço ou casa de festas) do evento? 😃"
     CONFIRMA_CORP_SEM_EMPRESA = "Pode me informar o nome da empresa e do evento para que eu possa colocar corretamente na proposta e em nossa agenda?"
     CONFIRMA_CASAMENTO = "Pode me informar o nome do casal para que eu possa colocar corretamente na proposta e em nossa agenda?"
     CONFIRMA_ANIVERSARIO = "Pode me informar o nome do/da aniversariante que eu possa colocar corretamente na proposta e em nossa agenda?"
@@ -113,21 +110,29 @@ class RoteirosPablo:
 # ======================================================================
 class NLUEngine:
     EXTRACTION_PROMPT = """
-    Você é um extrator de dados JSON. Leia o histórico da conversa.
-    Extraia as informações e atualize o estado. NÃO gere texto. Responda APENAS em JSON válido.
+    Você é um extrator de dados JSON estrito. Leia o histórico da conversa.
+    NÃO gere texto. Responda APENAS em JSON válido.
 
     REGRAS CRÍTICAS DE EXTRAÇÃO:
-    - "data": Mantenha EXATAMENTE o formato natural (ex: "18 de dezembro de 2026"). NÃO use padrão ISO.
-    - "horario_show": Mantenha EXATAMENTE o formato natural (ex: "22 horas", "1 da manhã").
-    - "nome_cliente": O nome da pessoa perguntando. REGRA ABSOLUTA: O SEU NOME É PABLO E O ARTISTA É RAFA. NUNCA atribua "Pablo" ou "Rafa" como nome do cliente.
-    - "intencao": Use "oi_simples" se cumprimentou sem pedir nada. Use "orcamento" se quer valores. Use "informacao" se deu dados.
+    - "tipo_evento": Exija a natureza EXATA. DEVE ser: Casamento, Corporativo, Aniversário, 15 Anos, Formatura, ou Evento Público. Se o cliente disser palavras genéricas como "show", "festa" ou "evento", CLASSIFIQUE COMO null.
+    - "data": Formato natural (ex: "19 de dezembro de 2026").
+    - "cidade": Apenas o nome da cidade.
+    - "casa_festas": O nome do espaço ou casa de festas. Se o cliente falar APENAS a cidade, classifique isso como null.
+    - "horario_show": Formato natural (ex: "22 horas").
+    - "nome_homenageado": Nome do casal/aniversariante/empresa.
+    - "nome_cliente": O SEU NOME É PABLO E O ARTISTA É RAFA. Nunca preencha "Pablo" ou "Rafa" aqui.
 
     FORMATO DE SAÍDA OBRIGATÓRIO:
     {
         "intencao": "oi_simples | orcamento | informacao",
         "entidades": {
-            "nome_cliente": "valor ou null", "tipo_evento": "valor ou null", "data": "valor ou null",
-            "local": "valor ou null", "horario_show": "valor ou null", "nome_homenageado": "valor ou null"
+            "nome_cliente": "valor ou null",
+            "tipo_evento": "Casamento | Corporativo | Aniversário | Formatura | 15 Anos | null",
+            "data": "valor ou null",
+            "cidade": "valor ou null",
+            "casa_festas": "valor ou null",
+            "horario_show": "valor ou null",
+            "nome_homenageado": "valor ou null"
         }
     }
     """
@@ -153,10 +158,10 @@ class PabloFSM:
         for k, v in entidades.items():
             if v and str(v).lower() not in ["null", "none"]: memoria[k] = v
 
+        # Bloqueio de Identidade
         nome_raw = memoria.get("nome_cliente")
         if nome_raw and str(nome_raw).strip().lower() in ["pablo", "rafa", "rafa cout"]:
             nome_raw = None; memoria["nome_cliente"] = None
-            
         if not nome_raw and memoria.get("nome_homenageado"):
             if str(memoria.get("nome_homenageado")).strip().lower() not in ["pablo", "rafa", "rafa cout"]:
                 nome_raw = memoria.get("nome_homenageado")
@@ -178,10 +183,15 @@ class PabloFSM:
             evento = str(evento_raw).strip().title() if evento_raw else "evento"
             data = str(memoria.get("data", "")).strip()
             horario = str(memoria.get("horario_show", "")).strip()
-            local = str(memoria.get("local", "")).strip().title()
+            
+            # Consolida cidade e casa_festas para o PDF
+            cidade_str = str(memoria.get("cidade", "")).strip().title()
+            casa_str = str(memoria.get("casa_festas", "")).strip().title()
+            local_final = f"{casa_str}, {cidade_str}".strip(" ,") if casa_str else cidade_str
+            
             proposta_texto = RoteirosPablo.PROPOSTA_PADRAO.format(
                 saudacao_proposta=saudacao_proposta, evento=evento,
-                data_horario=f"{data} às {horario}", local=local
+                data_horario=f"{data} às {horario}", local=local_final
             )
             return RoteirosPablo.PONTE_CONVERSACIONAL + proposta_texto
 
@@ -189,10 +199,13 @@ class PabloFSM:
             memoria["ja_se_apresentou"] = True
             return RoteirosPablo.SAUDACAO_SIMPLES.format(saudacao_tempo=saudacao_tempo, nome_cliente=tratamento_nome).replace(" .", ".")
 
+        # -------------------------------------------------------------
+        # PILARES FUNDAMENTAIS (Crivo Rigoroso)
+        # -------------------------------------------------------------
         campos_faltantes = []
-        if not memoria.get("tipo_evento"): campos_faltantes.append("Nome do evento")
+        if not memoria.get("tipo_evento"): campos_faltantes.append("Tipo exato do evento (Ex: Casamento, Aniversário, Corporativo)")
         if not memoria.get("data"): campos_faltantes.append("Data completa (com ano)")
-        if not memoria.get("local"): campos_faltantes.append("Local (Cidade e Casa de Festas)")
+        if not memoria.get("cidade") and not memoria.get("casa_festas"): campos_faltantes.append("Local (Cidade e Casa de Festas)")
         if not memoria.get("horario_show"): campos_faltantes.append("Horário previsto para o show")
 
         if campos_faltantes:
@@ -206,12 +219,32 @@ class PabloFSM:
             else:
                 return RoteirosPablo.PARCIAL_CONTINUACAO.format(campos_faltantes=texto_faltantes)
 
+        # -------------------------------------------------------------
+        # MICRO-VALIDAÇÕES (SÓ ACONTECEM SE OS 4 PILARES ESTIVEREM CHEIOS)
+        # -------------------------------------------------------------
+        
+        # Micro 1: Local Incompleto (Deu a cidade, mas não a casa de festas)
+        if memoria.get("cidade") and not memoria.get("casa_festas"):
+            if not memoria.get("local_perguntado"): # Evita loop se a IA não entender a casa no turno seguinte
+                memoria["local_perguntado"] = True
+                return RoteirosPablo.CONFIRMA_LOCAL
+                
+        # Micro 2: Confirmação de Horário (Festa vs Show)
+        if not memoria.get("horario_perguntado"):
+            horario_str = str(memoria.get("horario_show")).lower()
+            is_madrugada = any(m in horario_str for m in ["madrugada", "00:", "01:", "02:", "03:", "04:", "1 ", "2 "])
+            memoria["horario_perguntado"] = True # Marca para não repetir
+            if not is_madrugada:
+                return RoteirosPablo.CONFIRMA_HORARIO
+
+        # Micro 3: Nomes Específicos
         tipo = str(memoria.get("tipo_evento") or "").lower()
         if not memoria.get("nome_homenageado"):
             if "casamento" in tipo: return RoteirosPablo.CONFIRMA_CASAMENTO
             elif "anivers" in tipo or "15 anos" in tipo: return RoteirosPablo.CONFIRMA_ANIVERSARIO
-            elif "corporativo" in tipo: return RoteirosPablo.CONFIRMA_CORP_SEM_EMPRESA
+            elif "corporativo" in tipo or "confrat" in tipo: return RoteirosPablo.CONFIRMA_CORP_SEM_EMPRESA
 
+        # Se passou por tudo, Gatilho final.
         memoria["pre_proposta_enviada"] = True
         return RoteirosPablo.PRE_PROPOSTA
 
@@ -229,9 +262,6 @@ if st.sidebar.button("🗑️ Apagar Sessão Deste Número", type="primary"):
     st.sidebar.success("Memória apagada! Recarregue a página.")
     st.stop()
 
-# ----------------------------------------------------------------------
-# O Motor deixa de depender do st.session_state e passa a ler do Banco.
-# ----------------------------------------------------------------------
 dados_do_banco = db.get_lead(numero_lead)
 memoria_lead = dados_do_banco["memoria_lead"]
 chat_history = dados_do_banco["chat_history"]
@@ -239,28 +269,24 @@ chat_history = dados_do_banco["chat_history"]
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V8 - BD]")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V9 - Alta Granularidade]")
     st.caption(f"A conversar com: `{numero_lead}` (Dados persistidos no SQLite)")
 
     nlu = NLUEngine()
     fsm = PabloFSM()
 
-    # Renderiza o histórico direto do Banco de Dados
     for msg in chat_history:
         avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
         with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
 
     if prompt := st.chat_input("Mensagem do cliente..."):
-        # 1. Adiciona Input
         with st.chat_message("user", avatar="🧑‍💻"):
             st.markdown(prompt)
         chat_history.append({"role": "user", "content": prompt})
         
-        # Guarda estado imediato (evita perdas se a API cair)
         db.save_lead(numero_lead, memoria_lead, chat_history)
 
-        # 2. Processa IA e FSM
         with st.spinner("Lendo banco de dados e processando IA..."):
             analise_json = nlu.analisar_mensagem(chat_history)
             resposta_oficial = fsm.processar_estado(
@@ -269,15 +295,11 @@ with col_chat:
                 memoria=memoria_lead
             )
 
-        # 3. Adiciona Output
         with st.chat_message("assistant", avatar="🤖"):
             st.markdown(resposta_oficial)
         chat_history.append({"role": "assistant", "content": resposta_oficial})
 
-        # 4. Commit Final no Banco de Dados
         db.save_lead(numero_lead, memoria_lead, chat_history)
-        
-        # Força o recarregamento da tela para mostrar a memória atualizada
         st.rerun()
 
 with col_debug:
