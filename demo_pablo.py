@@ -85,6 +85,13 @@ class LeadRepository:
             cursor.execute("DELETE FROM leads WHERE telefone = ?", (telefone,))
             conn.commit()
 
+    def get_all_leads(self) -> list:
+        """Recupera todas as sessões ativas para o Painel de Telemetria."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT telefone, estado_fsm_json, updated_at FROM leads ORDER BY updated_at DESC")
+            return cursor.fetchall()
+
 # ======================================================================
 # 2. CAMADA DE NEGÓCIOS: ROTEIROS EXATOS DO DOCUMENTO
 # ======================================================================
@@ -195,7 +202,6 @@ class PabloFSM:
         tratamento_nome = f", {nome}" if nome else ""
         saudacao_proposta = f"{nome}, " if nome else ""
 
-        # GERAÇÃO IA PÓS-PROPOSTA (Estratégia de Handoff Humano)
         if memoria.get("proposta_enviada"):
             return self.ai.gerar_resposta_pos_proposta(historico)
 
@@ -259,28 +265,27 @@ class PabloFSM:
         return RoteirosPablo.PRE_PROPOSTA
 
 # ======================================================================
-# 5. RENDERIZAÇÃO DA INTERFACE & INJEÇÃO DE BANCO DE DADOS
+# 5. RENDERIZAÇÃO DA INTERFACE (Múltiplas Janelas) & INJEÇÃO DE BD
 # ======================================================================
 db = LeadRepository(Config.DB_PATH)
 
-st.sidebar.markdown("### 📱 Simulador de WhatsApp")
-st.sidebar.caption("O sistema agora isola as conversas usando um ID único de telefone armazenado em SQLite.")
-numero_lead = st.sidebar.text_input("Número do Lead (ex: 55819999999)", value="5581999999999")
-
-if st.sidebar.button("🗑️ Apagar Sessão Deste Número", type="primary"):
-    db.delete_lead(numero_lead)
-    st.sidebar.success("Memória apagada! Recarregue a página.")
-    st.stop()
+st.sidebar.markdown("### 📱 Controlo de Sessão")
+st.sidebar.caption("Altere o número para iniciar um novo teste do zero.")
+numero_lead = st.sidebar.text_input("Número do Lead Atual:", value="5581999999999")
 
 dados_do_banco = db.get_lead(numero_lead)
 memoria_lead = dados_do_banco["memoria_lead"]
 chat_history = dados_do_banco["chat_history"]
 
-col_chat, col_debug = st.columns([2, 1])
+# SEPARAÇÃO MACRO: Abas Isoladas
+tab_chat, tab_telemetria = st.tabs(["💬 Simulador de Atendimento", "🗄️ Painel de Telemetria (BD)"])
 
-with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V12 - IA com Handoff]")
-    st.caption(f"A conversar com: `{numero_lead}` (Dados persistidos no SQLite)")
+# ----------------------------------------------------------------------
+# JANELA 1: CHAT DO CLIENTE
+# ----------------------------------------------------------------------
+with tab_chat:
+    st.title(f"Atendimento: Rafa Cout")
+    st.caption(f"Simulando conversa com: `{numero_lead}`")
 
     ai = AIEngine()
     fsm = PabloFSM(ai)
@@ -297,7 +302,7 @@ with col_chat:
         
         db.save_lead(numero_lead, memoria_lead, chat_history)
 
-        with st.spinner("Processando Inteligência Híbrida (Triagem ou Conversação)..."):
+        with st.spinner("Processando Inteligência Híbrida..."):
             analise_json = ai.analisar_mensagem(chat_history)
             resposta_oficial = fsm.processar_estado(
                 intencao=analise_json.get("intencao", "informacao"),
@@ -313,7 +318,25 @@ with col_chat:
         db.save_lead(numero_lead, memoria_lead, chat_history)
         st.rerun()
 
-with col_debug:
-    st.markdown("### 💾 Base de Dados (SQLite)")
-    st.caption("Estado em Tempo Real da Memória FSM")
-    st.json(memoria_lead)
+# ----------------------------------------------------------------------
+# JANELA 2: TELEMETRIA E CONTROLO DE TESTES
+# ----------------------------------------------------------------------
+with tab_telemetria:
+    st.markdown("### 💾 Gestão Global de Sessões (SQLite)")
+    st.caption("Abaixo estão todas as conversas isoladas. Expanda uma janela para ver o estado interno da FSM ou apagar o teste.")
+    
+    todos_leads = db.get_all_leads()
+    
+    if not todos_leads:
+        st.info("Nenhum teste registado no banco de dados ainda.")
+    else:
+        for telefone_db, estado_json, atualizado_em in todos_leads:
+            # SEPARAÇÃO MICRO: Cada lead ganha um expander (Janela independente)
+            with st.expander(f"📱 Lead: {telefone_db} | Última Interação: {atualizado_em}", expanded=(telefone_db == numero_lead)):
+                estado_dict = json.loads(estado_json) if estado_json else {}
+                st.json(estado_dict)
+                
+                # Botão isolado para apagar apenas esta conversa
+                if st.button(f"🗑️ Apagar Memória do Lead {telefone_db}", key=f"del_{telefone_db}"):
+                    db.delete_lead(telefone_db)
+                    st.rerun()
