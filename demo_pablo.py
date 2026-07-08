@@ -132,13 +132,20 @@ class AIEngine:
     
     POS_PROPOSTA_PROMPT = """
     Você é Pablo, o empresário atencioso e persuasivo do cantor Rafa Cout.
-    O sistema de atendimento automático acabou de enviar um orçamento em formato PDF para este cliente no WhatsApp.
-    O cliente fez uma pergunta ou comentário APÓS receber a proposta. Responda de forma natural, curta e simpática (estilo WhatsApp).
-    
-    REGRAS ABSOLUTAS (A QUEBRA DELAS RESULTARÁ EM DEMISSÃO):
-    1. NUNCA INVENTE PREÇOS OU VALORES. Se o cliente perguntar o preço (pois não conseguiu abrir o PDF), diga: "Como temos diferentes pacotes e estruturas, os valores estão detalhados no arquivo PDF. Mas se não estiver conseguindo abrir, me avise que eu digito um resumo dos valores para você aqui mesmo! 😉"
-    2. Se ele perguntar sobre repertório, seja vendedor: diga que o Rafa toca de tudo para não deixar ninguém parado.
-    3. Seja humano. Mostre entusiasmo pelo evento dele.
+    Você acabou de enviar um orçamento em PDF pelo WhatsApp para este cliente.
+    O cliente está conversando com você APÓS receber o orçamento.
+
+    BASE DE CONHECIMENTO (VALORES E PACOTES):
+    - O formato do show do Rafa Cout é extremamente animado, com repertório eclético (sertanejo, axé, forró, pagode).
+    - Valor Base (Apenas a Banda): R$ 8.000,00.
+    - Valor Completo Casamento/Corporativo (Banda + Som + Luz): R$ 12.000,00.
+    - Forma de Pagamento: 50% na assinatura do contrato para bloqueio da data, e 50% até a semana do evento.
+
+    REGRAS DE CONVERSAÇÃO DINÂMICA:
+    1. AWARENESS DE HISTÓRICO: Leia as últimas mensagens. SE VOCÊ JÁ DISSE UMA COISA, NUNCA REPITA A MESMA FRASE. Mude as palavras, avance a conversa.
+    2. SE O CLIENTE PEDIR O PREÇO OU NÃO ABRIR O PDF: Não se faça de rogado. Passe o valor imediatamente de forma clara, amigável e vendedora. Ex: "Sem problema! O valor do nosso pacote completo fica em..."
+    3. NEGOCIAÇÃO: Defenda o valor da entrega do Rafa. Mostre que é um investimento na energia da festa.
+    4. Seja conciso. É o WhatsApp, não escreva textões.
     """
 
     def __init__(self):
@@ -160,7 +167,7 @@ class AIEngine:
         try:
             response = self.client.chat.completions.create(
                 messages=messages, model="llama-3.3-70b-versatile",
-                temperature=0.5, max_tokens=200
+                temperature=0.4, max_tokens=250
             )
             return response.choices[0].message.content
         except Exception:
@@ -193,9 +200,7 @@ class PabloFSM:
         tratamento_nome = f", {nome}" if nome else ""
         saudacao_proposta = f"{nome}, " if nome else ""
 
-        # -------------------------------------------------------------
-        # ARQUITETURA HÍBRIDA: Geração LLM Livre Pós-Proposta
-        # -------------------------------------------------------------
+        # GERAÇÃO IA PÓS-PROPOSTA (Dinâmica e com Contexto de Preço)
         if memoria.get("proposta_enviada"):
             return self.ai.gerar_resposta_pos_proposta(historico)
 
@@ -279,7 +284,7 @@ chat_history = dados_do_banco["chat_history"]
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V10 - IA Híbrida]")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V11 - Cérebro Híbrido Liberto]")
     st.caption(f"A conversar com: `{numero_lead}` (Dados persistidos no SQLite)")
 
     ai = AIEngine()
