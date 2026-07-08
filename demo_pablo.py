@@ -131,21 +131,16 @@ class AIEngine:
     """
     
     POS_PROPOSTA_PROMPT = """
-    Você é Pablo, o empresário atencioso e persuasivo do cantor Rafa Cout.
+    Você é Pablo, o empresário atencioso do cantor Rafa Cout.
     Você acabou de enviar um orçamento em PDF pelo WhatsApp para este cliente.
     O cliente está conversando com você APÓS receber o orçamento.
 
-    BASE DE CONHECIMENTO (VALORES E PACOTES):
-    - O formato do show do Rafa Cout é extremamente animado, com repertório eclético (sertanejo, axé, forró, pagode).
-    - Valor Base (Apenas a Banda): R$ 8.000,00.
-    - Valor Completo Casamento/Corporativo (Banda + Som + Luz): R$ 12.000,00.
-    - Forma de Pagamento: 50% na assinatura do contrato para bloqueio da data, e 50% até a semana do evento.
-
-    REGRAS DE CONVERSAÇÃO DINÂMICA:
-    1. AWARENESS DE HISTÓRICO: Leia as últimas mensagens. SE VOCÊ JÁ DISSE UMA COISA, NUNCA REPITA A MESMA FRASE. Mude as palavras, avance a conversa.
-    2. SE O CLIENTE PEDIR O PREÇO OU NÃO ABRIR O PDF: Não se faça de rogado. Passe o valor imediatamente de forma clara, amigável e vendedora. Ex: "Sem problema! O valor do nosso pacote completo fica em..."
-    3. NEGOCIAÇÃO: Defenda o valor da entrega do Rafa. Mostre que é um investimento na energia da festa.
-    4. Seja conciso. É o WhatsApp, não escreva textões.
+    REGRAS DE CONVERSAÇÃO DINÂMICA (HUMAN HANDOFF):
+    1. AWARENESS DE HISTÓRICO: Leia as últimas mensagens para evitar repetições mecânicas. Mantenha a naturalidade.
+    2. REGRA DE OURO DOS VALORES: Você NUNCA deve falar valores exatos, preços ou separar custos de banda e estrutura. Essa negociação é feita exclusivamente pelo humano.
+    3. GANHO DE TEMPO (HANDOFF): Se o cliente perguntar o preço, informar que não está conseguindo abrir o PDF, ou fizer perguntas operacionais complexas, aja naturalmente e PEÇA UM TEMPO para retornar.
+       - Exemplos de postura: "Deixa eu verificar isso direitinho para você. Me dá só um instante que eu já te retorno com essa informação exata!" ou "Opa, sem problemas! Vou ver o que houve com o arquivo e já te passo o resumo certinho, só um momento!"
+    4. Seja simpático, solícito e conciso. Não escreva textos longos.
     """
 
     def __init__(self):
@@ -167,7 +162,7 @@ class AIEngine:
         try:
             response = self.client.chat.completions.create(
                 messages=messages, model="llama-3.3-70b-versatile",
-                temperature=0.4, max_tokens=250
+                temperature=0.4, max_tokens=150
             )
             return response.choices[0].message.content
         except Exception:
@@ -200,7 +195,7 @@ class PabloFSM:
         tratamento_nome = f", {nome}" if nome else ""
         saudacao_proposta = f"{nome}, " if nome else ""
 
-        # GERAÇÃO IA PÓS-PROPOSTA (Dinâmica e com Contexto de Preço)
+        # GERAÇÃO IA PÓS-PROPOSTA (Estratégia de Handoff Humano)
         if memoria.get("proposta_enviada"):
             return self.ai.gerar_resposta_pos_proposta(historico)
 
@@ -284,7 +279,7 @@ chat_history = dados_do_banco["chat_history"]
 col_chat, col_debug = st.columns([2, 1])
 
 with col_chat:
-    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V11 - Cérebro Híbrido Liberto]")
+    st.title("📱 Atendimento Oficial - Rafa Cout [BUILD V12 - IA com Handoff]")
     st.caption(f"A conversar com: `{numero_lead}` (Dados persistidos no SQLite)")
 
     ai = AIEngine()
